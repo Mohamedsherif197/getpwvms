@@ -1,0 +1,74 @@
+---
+- name: deploy VM from template demo
+  hosts: localhost
+  become: false
+  gather_facts: false
+  collections:
+    - community.vmware
+  pre_tasks:
+    - include_vars: vmnewvars.yaml
+
+  tasks:
+  - name: Gather all VMs information
+    vmware_vm_info:
+      hostname: '{{ vcenter_hostname }}'
+      username: '{{ vcenter_username }}'
+      password: '{{ vcenter_password }}'
+      validate_certs: no
+    register: all_vm_info
+    delegate_to: localhost
+
+
+  - name: Gather a list of all powered on VMs
+    set_fact:
+      on_vm: "{{ all_vm_info.virtual_machines | json_query(query) }}"
+    vars:
+      query: "[?power_state=='poweredOn']"
+    register: jsoncontent
+
+  - name: Gather a list of all powered on VM names
+    debug: msg="{{ on_vm | json_query(jmesquery) }}"
+    vars:
+      jmesquery: "[*].ip_address"
+    register: powerlist 
+
+  - debug:
+      var: powerlist.msg | flatten
+
+  - name: create inventory file
+    shell: 
+      cmd: touch PoweredOnVMs
+    args:
+      warn: False
+
+  - name: add services
+    lineinfile:
+      state: present
+      insertafter: EOF
+      dest: "PoweredOnVMs"
+      line: "{{ item }}"
+    with_items:
+      - '[ubu]'
+      - '{{ powerlist.msg | flatten}}'
+      - ''
+      - '[ubu:vars]'
+      - 'ansible_port=22'
+      - 'ansible_connection=ssh'
+      - 'ansible_user=x'
+      - 'ansible_password=x'
+      - 'ansible_winrm_server_cert_validation=ignore'
+      - 'ansible_winrm_transport=basic'
+      
+  - name: delete ip addresses
+    ansible.builtin.lineinfile: 
+      path: PoweredOnVMs
+      regexp: "192.x.x.x"
+      state: absent
+
+  - name: delete inventory file
+    shell: 
+      cmd: rm PoweredOnVMs
+    args:
+      warn: False
+
+
